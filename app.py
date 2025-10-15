@@ -22,12 +22,10 @@ def load_data():
     """Užkrauna duomenis iš CSV failo arba sukuria tuščią DataFrame."""
     if os.path.exists(DATA_FILE):
         df = pd.read_csv(DATA_FILE, parse_dates=['Data'])
-        # Konvertuojame į Int64, kad palaikytų tuščias reikšmes (NaN)
         df['CNN FG'] = df['CNN FG'].astype('Int64')
         df['Crypto FG'] = df['Crypto FG'].astype('Int64')
         return df.set_index('Data')
     else:
-        # Jei failo nėra, sukuriame tuščią struktūrą
         return pd.DataFrame({
             'Data': pd.to_datetime([]),
             'CNN FG': pd.Series([], dtype='Int64'),
@@ -41,7 +39,6 @@ def save_data(df):
     df_to_save.to_csv(DATA_FILE, index=False)
 
 # --- Duomenų Būsenos Inicializavimas ---
-# Užkrauname duomenis tik vieną kartą per sesiją
 if 'fg_data' not in st.session_state:
     st.session_state.fg_data = load_data()
 
@@ -66,7 +63,7 @@ with st.sidebar:
                 st.session_state.fg_data = pd.concat([st.session_state.fg_data, naujas_irasas])
                 st.session_state.fg_data.sort_index(ascending=False, inplace=True)
                 st.success(f"Įrašas pridėtas. Paspauskite 'Išsaugoti pakeitimus', kad išsaugotumėte.")
-                st.rerun() # Iškart atnaujiname pagrindinę lentelę
+                st.rerun()
 
 # --- PAGRINDINIS LANGAS: Duomenų Redagavimas ir Išsaugojimas ---
 st.header("✍️ Redaguoti duomenis")
@@ -74,27 +71,35 @@ st.header("✍️ Redaguoti duomenis")
 if st.session_state.fg_data.empty:
     st.info("Kol kas nėra jokių duomenų. Pridėkite naują įrašą šoninėje juostoje.")
 else:
-    # `st.data_editor` grąžina pakeistą DataFrame, kurį laikinai išsaugome
     redaguoti_duomenys = st.data_editor(
         st.session_state.fg_data,
         use_container_width=True,
         num_rows="dynamic"
     )
     
-    # Rodyti išsaugojimo mygtuką tik jei yra pakeitimų
     if not redaguoti_duomenys.equals(st.session_state.fg_data):
         st.warning("⚠️ Jūs atlikote pakeitimų. Paspauskite mygtuką, kad juos išsaugotumėte.")
         if st.button("💾 Išsaugoti pakeitimus", type="primary", use_container_width=True):
             save_data(redaguoti_duomenys)
-            st.session_state.fg_data = redaguoti_duomenys # Atnaujiname pagrindinę būseną
+            st.session_state.fg_data = redaguoti_duomenys
             st.success("✅ Pakeitimai sėkmingai išsaugoti!")
             st.rerun()
     
     # --- CSV Atsisiuntimo Mygtukas ---
     st.header("📥 Atsisiųsti CSV")
-    # Visada siūlome atsisiųsti naujausią, išsaugotą versiją
-    csv_df = st.session_state.fg_data.reset_index()
+    
+    # <<< --- PAKEITIMAS YRA ČIA --- >>>
+    # Sukuriame kopiją, kad nepakeistume originalių duomenų
+    df_to_download = st.session_state.fg_data.copy()
+    
+    # UŽTIKRINAME, kad indekso pavadinimas yra teisingas
+    df_to_download.index.name = 'Data'
+    
+    # Toliau viskas kaip anksčiau
+    csv_df = df_to_download.reset_index()
     csv_df['Data'] = csv_df['Data'].dt.strftime('%Y-%m-%d')
+    # <<< --- PAKEITIMO PABAIGA --- >>>
+
     csv_failas = csv_df.to_csv(index=False).encode('utf-8')
     
     st.download_button(
