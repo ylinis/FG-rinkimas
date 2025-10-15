@@ -3,7 +3,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import os
+from streamlit_gsheets import GSheetsConnection
 
 # --- Programos Konfigūracija ---
 st.set_page_config(
@@ -11,32 +11,24 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📈 Fear & Greed Indeksų Duomenų Suvestinė")
+st.title("📈 Fear & Greed Indeksų Suvestinė (su Google Sheets)")
 st.markdown("Rankinis CNN ir Crypto F&G indeksų suvedimas su nuolatiniu išsaugojimu.")
 
-# --- Duomenų Failo Kelias ---
-DATA_FILE = "fg_data.csv"
+# --- Prisijungimas prie Google Sheets ---
+# Naudojame prisijungimą, aprašytą Streamlit Secrets [connections.gcs]
+conn = st.connection("gcs", type=GSheetsConnection)
 
 # --- Duomenų Užkrovimo Funkcija ---
 def load_data():
-    """Užkrauna duomenis iš CSV failo arba sukuria tuščią DataFrame."""
-    if os.path.exists(DATA_FILE):
-        df = pd.read_csv(DATA_FILE, parse_dates=['Data'])
-        df['CNN FG'] = df['CNN FG'].astype('Int64')
-        df['Crypto FG'] = df['Crypto FG'].astype('Int64')
-        return df.set_index('Data')
-    else:
-        return pd.DataFrame({
-            'Data': pd.to_datetime([]),
-            'CNN FG': pd.Series([], dtype='Int64'),
-            'Crypto FG': pd.Series([], dtype='Int64')
-        }).set_index('Data')
-
-# --- Duomenų Išsaugojimo Funkcija ---
-def save_data(df):
-    """Išsaugo DataFrame į CSV failą."""
-    df_to_save = df.reset_index()
-    df_to_save.to_csv(DATA_FILE, index=False)
+    """Užkrauna duomenis iš Google Sheets."""
+    df = conn.read(usecols=[0, 1, 2], ttl="5s") # TTL - Talpinimo laikas
+    # Pašaliname tuščias eilutes, jei tokių atsiranda
+    df.dropna(how="all", inplace=True)
+    # Užtikriname teisingus duomenų tipus
+    df['Data'] = pd.to_datetime(df['Data'])
+    df['CNN FG'] = pd.to_numeric(df['CNN FG'], errors='coerce').astype('Int64')
+    df['Crypto FG'] = pd.to_numeric(df['Crypto FG'], errors='coerce').astype('Int64')
+    return df.set_index('Data')
 
 # --- Duomenų Būsenos Inicializavimas ---
 if 'fg_data' not in st.session_state:
@@ -62,14 +54,14 @@ with st.sidebar:
                 }, index=[pd_data])
                 st.session_state.fg_data = pd.concat([st.session_state.fg_data, naujas_irasas])
                 st.session_state.fg_data.sort_index(ascending=False, inplace=True)
-                st.success(f"Įrašas pridėtas. Paspauskite 'Išsaugoti pakeitimus', kad išsaugotumėte.")
+                st.success("Įrašas pridėtas. Paspauskite 'Išsaugoti pakeitimus'.")
                 st.rerun()
 
 # --- PAGRINDINIS LANGAS: Duomenų Redagavimas ir Išsaugojimas ---
 st.header("✍️ Redaguoti duomenis")
 
 if st.session_state.fg_data.empty:
-    st.info("Kol kas nėra jokių duomenų. Pridėkite naują įrašą šoninėje juostoje.")
+    st.info("Kol kas nėra jokių duomenų.")
 else:
     redaguoti_duomenys = st.data_editor(
         st.session_state.fg_data,
@@ -79,27 +71,21 @@ else:
     
     if not redaguoti_duomenys.equals(st.session_state.fg_data):
         st.warning("⚠️ Jūs atlikote pakeitimų. Paspauskite mygtuką, kad juos išsaugotumėte.")
-        if st.button("💾 Išsaugoti pakeitimus", type="primary", use_container_width=True):
-            save_data(redaguoti_duomenys)
-            st.session_state.fg_data = redaguoti_duomenys
+        if st.button("💾 Išsaugoti pakeitimus į Google Sheets", type="primary", use_container_width=True):
+            # Visiškai perrašome lapą su atnaujintais duomenimis
+            df_to_save = redaguoti_duomenys.reset_index()
+            conn.update(worksheet="Pirmas lapas", data=df_to_save) # Nurodykite savo lapo pavadinimą
+            st.session_state.fg_data = redaguoti_duomenys # Atnaujiname būseną
             st.success("✅ Pakeitimai sėkmingai išsaugoti!")
             st.rerun()
-    
-    # --- CSV Atsisiuntimo Mygtukas ---
-    st.header("📥 Atsisiųsti CSV")
-    
-    # <<< --- PAKEITIMAS YRA ČIA --- >>>
-    # Sukuriame kopiją, kad nepakeistume originalių duomenų
+
+# --- CSV Atsisiuntimo Mygtukas ---
+st.header("📥 Atsisiųsti CSV")
+if not st.session_state.fg_data.empty:
     df_to_download = st.session_state.fg_data.copy()
-    
-    # UŽTIKRINAME, kad indekso pavadinimas yra teisingas
     df_to_download.index.name = 'Data'
-    
-    # Toliau viskas kaip anksčiau
     csv_df = df_to_download.reset_index()
     csv_df['Data'] = csv_df['Data'].dt.strftime('%Y-%m-%d')
-    # <<< --- PAKEITIMO PABAIGA --- >>>
-
     csv_failas = csv_df.to_csv(index=False).encode('utf-8')
     
     st.download_button(
