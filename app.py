@@ -11,20 +11,17 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📈 Fear & Greed Indeksų Suvestinė (su Google Sheets)")
+st.title("📈 Fear & Greed Indeksų Duomenų Suvestinė (su Google Sheets)")
 st.markdown("Rankinis CNN ir Crypto F&G indeksų suvedimas su nuolatiniu išsaugojimu.")
 
 # --- Prisijungimas prie Google Sheets ---
-# Naudojame prisijungimą, aprašytą Streamlit Secrets [connections.gcs]
 conn = st.connection("gcs", type=GSheetsConnection)
 
 # --- Duomenų Užkrovimo Funkcija ---
 def load_data():
     """Užkrauna duomenis iš Google Sheets."""
-    df = conn.read(usecols=[0, 1, 2], ttl="5s") # TTL - Talpinimo laikas
-    # Pašaliname tuščias eilutes, jei tokių atsiranda
+    df = conn.read(usecols=[0, 1, 2], ttl="5s")
     df.dropna(how="all", inplace=True)
-    # Užtikriname teisingus duomenų tipus
     df['Data'] = pd.to_datetime(df['Data'])
     df['CNN FG'] = pd.to_numeric(df['CNN FG'], errors='coerce').astype('Int64')
     df['Crypto FG'] = pd.to_numeric(df['Crypto FG'], errors='coerce').astype('Int64')
@@ -72,18 +69,22 @@ else:
     if not redaguoti_duomenys.equals(st.session_state.fg_data):
         st.warning("⚠️ Jūs atlikote pakeitimų. Paspauskite mygtuką, kad juos išsaugotumėte.")
         if st.button("💾 Išsaugoti pakeitimus į Google Sheets", type="primary", use_container_width=True):
-            # Visiškai perrašome lapą su atnaujintais duomenimis
             df_to_save = redaguoti_duomenys.reset_index()
-            conn.update(worksheet="Pirmas lapas", data=df_to_save) # Nurodykite savo lapo pavadinimą
-            st.session_state.fg_data = redaguoti_duomenys # Atnaujiname būseną
+            # Prieš išsaugant, nurodome lapo pavadinimą. Įsitikinkite, kad jis teisingas!
+            conn.update(worksheet="Pirmas lapas", data=df_to_save) 
+            st.session_state.fg_data = redaguoti_duomenys
             st.success("✅ Pakeitimai sėkmingai išsaugoti!")
             st.rerun()
 
 # --- CSV Atsisiuntimo Mygtukas ---
 st.header("📥 Atsisiųsti CSV")
 if not st.session_state.fg_data.empty:
+    # Sukuriame kopiją, kad nepakeistume originalių duomenų
     df_to_download = st.session_state.fg_data.copy()
+    
+    # PATAISYMAS: Užtikriname, kad indekso pavadinimas yra teisingas
     df_to_download.index.name = 'Data'
+    
     csv_df = df_to_download.reset_index()
     csv_df['Data'] = csv_df['Data'].dt.strftime('%Y-%m-%d')
     csv_failas = csv_df.to_csv(index=False).encode('utf-8')
@@ -93,5 +94,5 @@ if not st.session_state.fg_data.empty:
        data=csv_failas,
        file_name=f"fg_indeksai_{datetime.now().strftime('%Y-%m-%d')}.csv",
        mime='text/csv',
-       use_container_width=True
+       use_container_width=True # Ateityje pakeiskite į width='stretch'
     )
